@@ -419,6 +419,28 @@ class _AppCardState extends State<AppCard> {
                           );
                     },
                   ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    initialValue: widget.settings.customRegex,
+                    decoration: const InputDecoration(
+                      labelText: 'Custom Regex',
+                      hintText: 'Enter custom regex pattern',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.pattern),
+                    ),
+                    onChanged: (String value) async {
+                      setState(() {
+                        widget.settings.customRegex =
+                            value.isEmpty ? null : value;
+                      });
+                      await context
+                          .read<SettingsProvider>()
+                          .notificationSetAppSettings(
+                            widget.app,
+                            widget.settings,
+                          );
+                    },
+                  ),
                 ],
               ),
             ),

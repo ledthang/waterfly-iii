@@ -132,6 +132,7 @@ void nlCallback() async {
           api,
           evt.text!,
           localCurrency,
+          appSettings.customRegex ?? "",
         );
         // Fallback solution
         currency ??= localCurrency;
@@ -274,54 +275,93 @@ Future<(CurrencyRead?, double)> parseNotificationText(
   FireflyIii api,
   String notificationBody,
   CurrencyRead localCurrency,
+  String customRegex,
 ) async {
   CurrencyRead? currency;
   double amount = 0;
+
   // Try to extract some money
-  final Iterable<RegExpMatch> matches = rFindMoney.allMatches(notificationBody);
+  Iterable<RegExpMatch> matches;
+  if (customRegex.isNotEmpty) {
+    // Use custom regex for amount extraction
+    try {
+      final RegExp customRegExp = RegExp(customRegex);
+      matches = customRegExp.allMatches(notificationBody);
+    } catch (e) {
+      log.warning(
+        "Invalid custom regex: $customRegex, falling back to default",
+      );
+      matches = rFindMoney.allMatches(notificationBody);
+    }
+  } else {
+    // Use default regex
+    matches = rFindMoney.allMatches(notificationBody);
+  }
+
   if (matches.isNotEmpty) {
     for (RegExpMatch validMatch in matches) {
-      if ((validMatch.namedGroup("postCurrency")?.isNotEmpty ?? false) ||
-          (validMatch.namedGroup("preCurrency")?.isNotEmpty ?? false)) {
-        // extract currency
-        String currencyStr = validMatch.namedGroup("preCurrency") ?? "";
-        final String currencyStrAlt =
-            validMatch.namedGroup("postCurrency") ?? "";
-        if (currencyStr.isEmpty) {
-          currencyStr = currencyStrAlt;
-        }
-        if (currencyStr.isEmpty) {
-          log.warning("no currency found");
-        }
-        if (localCurrency.attributes.code == currencyStr ||
-            localCurrency.attributes.symbol == currencyStr ||
-            localCurrency.attributes.code == currencyStrAlt ||
-            localCurrency.attributes.symbol == currencyStrAlt) {
-          // On purpose: do nothing, the code calling this function should
-          // default to localCurrency anyways.
-        } else {
-          final Response<CurrencyArray> response = await api.v1CurrenciesGet();
-          if (!response.isSuccessful || response.body == null) {
-            log.warning("api currency fetch failed");
+      // For custom regex, we only extract amount, currency logic remains the same
+      bool shouldProcess = false;
+      if (customRegex.isNotEmpty) {
+        // Custom regex: just extract amount, assume local currency
+        shouldProcess = true;
+        currency = localCurrency; // Use local currency for custom regex
+      } else {
+        // Default regex: check for currency groups
+        shouldProcess =
+            (validMatch.namedGroup("postCurrency")?.isNotEmpty ?? false) ||
+            (validMatch.namedGroup("preCurrency")?.isNotEmpty ?? false);
+      }
+
+      if (shouldProcess) {
+        // extract currency (only for default regex)
+        if (customRegex.isEmpty) {
+          String currencyStr = validMatch.namedGroup("preCurrency") ?? "";
+          final String currencyStrAlt =
+              validMatch.namedGroup("postCurrency") ?? "";
+          if (currencyStr.isEmpty) {
+            currencyStr = currencyStrAlt;
+          }
+          if (currencyStr.isEmpty) {
+            log.warning("no currency found");
+          }
+          if (localCurrency.attributes.code == currencyStr ||
+              localCurrency.attributes.symbol == currencyStr ||
+              localCurrency.attributes.code == currencyStrAlt ||
+              localCurrency.attributes.symbol == currencyStrAlt) {
+            // On purpose: do nothing, the code calling this function should
+            // default to localCurrency anyways.
           } else {
-            for (CurrencyRead cur in response.body!.data) {
-              if (cur.attributes.code == currencyStr ||
-                  cur.attributes.symbol == currencyStr ||
-                  cur.attributes.code == currencyStrAlt ||
-                  cur.attributes.symbol == currencyStrAlt) {
-                currency = cur;
-                break;
+            final Response<CurrencyArray> response =
+                await api.v1CurrenciesGet();
+            if (!response.isSuccessful || response.body == null) {
+              log.warning("api currency fetch failed");
+            } else {
+              for (CurrencyRead cur in response.body!.data) {
+                if (cur.attributes.code == currencyStr ||
+                    cur.attributes.symbol == currencyStr ||
+                    cur.attributes.code == currencyStrAlt ||
+                    cur.attributes.symbol == currencyStrAlt) {
+                  currency = cur;
+                  break;
+                }
               }
             }
           }
-        }
-        if (currency == null) {
-          log.warning("no currency matched");
+          if (currency == null) {
+            log.warning("no currency matched");
+          }
         }
         // extract amount
-        // Check if string has a decimal separator
-        final String amountStr = (validMatch.namedGroup("amount") ?? "")
-            .replaceAll(RegExp(r"\s+"), "");
+        String amountStr;
+        if (customRegex.isNotEmpty) {
+          // For custom regex, use the entire match as amount
+          amountStr = validMatch.group(0) ?? "";
+        } else {
+          // For default regex, use the named group "amount"
+          amountStr = validMatch.namedGroup("amount") ?? "";
+        }
+        amountStr = amountStr.replaceAll(RegExp(r"\s+"), "");
         final int decimalSepPos =
             amountStr.length >= 3 &&
                     (amountStr[amountStr.length - 3] == "." ||
@@ -355,9 +395,9 @@ Future<(CurrencyRead?, double)> parseNotificationText(
               0;
         }
 
-        // Only break if currency matched --> is best match (with currency!)
+        // Only break if currency matched (for default regex) or if using custom regex
         // otherwise, might be better to continue to next match...
-        if (currency != null) {
+        if (customRegex.isNotEmpty || currency != null) {
           log.finest(() => "best match found, breaking");
           break;
         }
