@@ -313,82 +313,88 @@ Future<(CurrencyRead?, double)> parseNotificationText(
         shouldProcess =
             (validMatch.namedGroup("postCurrency")?.isNotEmpty ?? false) ||
             (validMatch.namedGroup("preCurrency")?.isNotEmpty ?? false);
+        currencyStr = validMatch.namedGroup("preCurrency")?.trim();
+        currencyStr ??= validMatch.namedGroup("postCurrency")?.trim();
       }
 
-      if (shouldProcess) {
-        if (currencyStr != null && currencyStr.isNotEmpty) {
-          final c = currencyStr.toUpperCase().trim();
-          if (c == "Đ" || c == "VND") {
-            currency = localCurrency;
-          } else {
-            try {
-              final response = await api.v1CurrenciesGet();
-              if (response.isSuccessful && response.body != null) {
-                for (final cur in response.body!.data) {
-                  if (cur.attributes.code.toUpperCase() == c ||
-                      cur.attributes.symbol.toUpperCase() == c) {
-                    currency = cur;
-                    break;
-                  }
+      if (!shouldProcess) continue;
+
+      if (currencyStr != null && currencyStr.isNotEmpty) {
+        final String c = currencyStr.trim();
+        final String cu = c.toUpperCase();
+
+        if (cu == "VND" ||
+            cu == "Đ" ||
+            c == "₫" ||
+            cu == (localCurrency.attributes.code).toUpperCase() ||
+            cu == (localCurrency.attributes.symbol).toUpperCase()) {
+          currency = localCurrency;
+        } else {
+          try {
+            final Response<CurrencyArray> response =
+                await api.v1CurrenciesGet();
+            if (response.isSuccessful && response.body != null) {
+              for (final CurrencyRead cur in response.body!.data) {
+                if (cur.attributes.code.toUpperCase() == c ||
+                    cur.attributes.symbol.toUpperCase() == c) {
+                  currency = cur;
+                  break;
                 }
               }
-            } catch (e) {
-              log.warning("currency lookup failed: $e");
             }
+          } catch (e) {
+            log.warning("currency lookup failed: $e");
           }
-        } else if (customRegex.isNotEmpty) {
-          // Fallback local
-          currency = localCurrency;
         }
-        // extract amount
-        String amountStr;
-        if (customRegex.isNotEmpty) {
-          // For custom regex, use the entire match as amount
-          amountStr = validMatch.group(0) ?? "";
-        } else {
-          // For default regex, use the named group "amount"
-          amountStr = validMatch.namedGroup("amount") ?? "";
-        }
-        amountStr = amountStr.replaceAll(RegExp(r"\s+"), "");
-        final int decimalSepPos =
-            amountStr.length >= 3 &&
-                    (amountStr[amountStr.length - 3] == "." ||
-                        amountStr[amountStr.length - 3] == ",")
-                ? amountStr.length - 3
-                : amountStr.length - 2;
-        final String decimalSep =
-            amountStr.length >= decimalSepPos && decimalSepPos > 0
-                ? amountStr[decimalSepPos]
-                : "";
-        if (decimalSep == "," || decimalSep == ".") {
-          final double wholes =
-              double.tryParse(
-                amountStr
-                    .substring(0, decimalSepPos)
-                    .replaceAll(",", "")
-                    .replaceAll(".", ""),
-              ) ??
-              0;
-          final String decStr = amountStr
-              .substring(decimalSepPos + 1)
-              .replaceAll(",", "")
-              .replaceAll(".", "");
-          final double dec = double.tryParse(decStr) ?? 0;
-          amount = decStr.length == 1 ? wholes + dec / 10 : wholes + dec / 100;
-        } else {
-          amount =
-              double.tryParse(
-                amountStr.replaceAll(",", "").replaceAll(".", ""),
-              ) ??
-              0;
-        }
+      } else if (customRegex.isNotEmpty) {
+        // Fallback local
+        currency = localCurrency;
+      }
 
-        // Only break if currency matched (for default regex) or if using custom regex
-        // otherwise, might be better to continue to next match...
-        if (customRegex.isNotEmpty || currency != null) {
-          log.finest(() => "best match found, breaking");
-          break;
+      // extract amount
+      final String amountStr = (validMatch.namedGroup("amount") ?? "")
+          .replaceAll(RegExp(r"\s+"), "");
+
+      if (amountStr.isEmpty) continue;
+
+      final int decimals =
+          currency?.attributes.decimalPlaces ??
+          localCurrency.attributes.decimalPlaces ??
+          2;
+
+      if (decimals == 0) {
+        final String digitsOnly = amountStr.replaceAll(RegExp(r"[.,]"), "");
+        amount = double.tryParse(digitsOnly) ?? 0;
+      } else {
+        final String s = amountStr;
+        final int lastDot = s.lastIndexOf('.');
+        final int lastComma = s.lastIndexOf(',');
+        final int decPos = lastDot > lastComma ? lastDot : lastComma;
+
+        if (decPos > 0 && (s.length - decPos - 1) <= 3) {
+          final String wholes = s
+              .substring(0, decPos)
+              .replaceAll(RegExp(r"[.,]"), "");
+          final String fracRaw = s
+              .substring(decPos + 1)
+              .replaceAll(RegExp(r"[.,]"), "");
+
+          final String frac =
+              (fracRaw.length > decimals)
+                  ? fracRaw.substring(0, decimals)
+                  : fracRaw.padRight(decimals, '0');
+
+          amount = double.tryParse("$wholes.$frac") ?? 0;
+        } else {
+          amount = double.tryParse(s.replaceAll(RegExp(r"[.,]"), "")) ?? 0;
         }
+      }
+
+      // Only break if currency matched (for default regex) or if using custom regex
+      // otherwise, might be better to continue to next match...
+      if (customRegex.isNotEmpty || currency != null) {
+        log.finest(() => "best match found, breaking");
+        break;
       }
     }
   } else {
