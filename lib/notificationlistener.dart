@@ -285,7 +285,7 @@ Future<(CurrencyRead?, double)> parseNotificationText(
   if (customRegex.isNotEmpty) {
     // Use custom regex for amount extraction
     try {
-      final RegExp customRegExp = RegExp(customRegex);
+      final RegExp customRegExp = RegExp(customRegex, caseSensitive: false);
       matches = customRegExp.allMatches(notificationBody);
     } catch (e) {
       log.warning(
@@ -302,10 +302,12 @@ Future<(CurrencyRead?, double)> parseNotificationText(
     for (RegExpMatch validMatch in matches) {
       // For custom regex, we only extract amount, currency logic remains the same
       bool shouldProcess = false;
+      String? currencyStr;
+
       if (customRegex.isNotEmpty) {
-        // Custom regex: just extract amount, assume local currency
+        // Custom regex
         shouldProcess = true;
-        currency = localCurrency; // Use local currency for custom regex
+        currencyStr = validMatch.namedGroup("currency");
       } else {
         // Default regex: check for currency groups
         shouldProcess =
@@ -314,43 +316,29 @@ Future<(CurrencyRead?, double)> parseNotificationText(
       }
 
       if (shouldProcess) {
-        // extract currency (only for default regex)
-        if (customRegex.isEmpty) {
-          String currencyStr = validMatch.namedGroup("preCurrency") ?? "";
-          final String currencyStrAlt =
-              validMatch.namedGroup("postCurrency") ?? "";
-          if (currencyStr.isEmpty) {
-            currencyStr = currencyStrAlt;
-          }
-          if (currencyStr.isEmpty) {
-            log.warning("no currency found");
-          }
-          if (localCurrency.attributes.code == currencyStr ||
-              localCurrency.attributes.symbol == currencyStr ||
-              localCurrency.attributes.code == currencyStrAlt ||
-              localCurrency.attributes.symbol == currencyStrAlt) {
-            // On purpose: do nothing, the code calling this function should
-            // default to localCurrency anyways.
+        if (currencyStr != null && currencyStr.isNotEmpty) {
+          final c = currencyStr.toUpperCase().trim();
+          if (c == "Đ" || c == "VND") {
+            currency = localCurrency;
           } else {
-            final Response<CurrencyArray> response =
-                await api.v1CurrenciesGet();
-            if (!response.isSuccessful || response.body == null) {
-              log.warning("api currency fetch failed");
-            } else {
-              for (CurrencyRead cur in response.body!.data) {
-                if (cur.attributes.code == currencyStr ||
-                    cur.attributes.symbol == currencyStr ||
-                    cur.attributes.code == currencyStrAlt ||
-                    cur.attributes.symbol == currencyStrAlt) {
-                  currency = cur;
-                  break;
+            try {
+              final response = await api.v1CurrenciesGet();
+              if (response.isSuccessful && response.body != null) {
+                for (final cur in response.body!.data) {
+                  if (cur.attributes.code.toUpperCase() == c ||
+                      cur.attributes.symbol.toUpperCase() == c) {
+                    currency = cur;
+                    break;
+                  }
                 }
               }
+            } catch (e) {
+              log.warning("currency lookup failed: $e");
             }
           }
-          if (currency == null) {
-            log.warning("no currency matched");
-          }
+        } else if (customRegex.isNotEmpty) {
+          // Fallback local
+          currency = localCurrency;
         }
         // extract amount
         String amountStr;
