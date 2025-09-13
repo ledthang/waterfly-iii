@@ -421,16 +421,38 @@ class _AppCardState extends State<AppCard> {
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
-                    initialValue: widget.settings.customRegex,
+                    initialValue: widget.settings.expenseRegex,
                     decoration: const InputDecoration(
-                      labelText: 'Custom Regex',
-                      hintText: 'Enter custom regex pattern',
+                      labelText: 'Custom Expense Regex',
+                      hintText: 'Enter custom expense regex pattern',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.pattern),
                     ),
                     onChanged: (String value) async {
                       setState(() {
-                        widget.settings.customRegex =
+                        widget.settings.expenseRegex =
+                            value.isEmpty ? null : value;
+                      });
+                      await context
+                          .read<SettingsProvider>()
+                          .notificationSetAppSettings(
+                            widget.app,
+                            widget.settings,
+                          );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    initialValue: widget.settings.incomeRegex,
+                    decoration: const InputDecoration(
+                      labelText: 'Custom Income Regex',
+                      hintText: 'Enter custom income regex pattern',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.pattern),
+                    ),
+                    onChanged: (String value) async {
+                      setState(() {
+                        widget.settings.incomeRegex =
                             value.isEmpty ? null : value;
                       });
                       await context

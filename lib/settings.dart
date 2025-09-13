@@ -23,7 +23,8 @@ class NotificationAppSettings {
     this.includeTitle = true,
     this.autoAdd = false,
     this.emptyNote = false,
-    this.customRegex,
+    this.expenseRegex,
+    this.incomeRegex,
   });
 
   final String appName;
@@ -31,7 +32,8 @@ class NotificationAppSettings {
   bool includeTitle = true;
   bool autoAdd = false;
   bool emptyNote = false;
-  String? customRegex;
+  String? expenseRegex;
+  String? incomeRegex;
 
   NotificationAppSettings.fromJson(Map<String, dynamic> json)
     : appName = json['appName'],
@@ -39,7 +41,8 @@ class NotificationAppSettings {
       includeTitle = json['includeTitle'] ?? true,
       autoAdd = json['autoAdd'] ?? false,
       emptyNote = json['emptyNote'] ?? false,
-      customRegex = json['customRegex'];
+      expenseRegex = json['expenseRegex'],
+      incomeRegex = json['incomeRegex'];
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'appName': appName,
@@ -47,7 +50,8 @@ class NotificationAppSettings {
     'includeTitle': includeTitle,
     'autoAdd': autoAdd,
     'emptyNote': emptyNote,
-    'customRegex': customRegex,
+    'expenseRegex': expenseRegex,
+    'incomeRegex': incomeRegex,
   };
 }
 

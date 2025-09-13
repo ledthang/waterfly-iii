@@ -128,11 +128,12 @@ void nlCallback() async {
         late CurrencyRead? currency;
         late double amount;
 
-        (currency, amount) = await parseNotificationText(
+        (currency, amount, _) = await parseNotificationText(
           api,
           evt.text!,
           localCurrency,
-          appSettings.customRegex ?? "",
+          appSettings.expenseRegex ?? "",
+          appSettings.incomeRegex ?? "",
         );
         // Fallback solution
         currency ??= localCurrency;
@@ -271,135 +272,124 @@ Future<void> nlNotificationTap(
   );
 }
 
-Future<(CurrencyRead?, double)> parseNotificationText(
+Future<(CurrencyRead?, double, bool)> parseNotificationText(
   FireflyIii api,
   String notificationBody,
   CurrencyRead localCurrency,
-  String customRegex,
+  String expenseRegex,
+  String incomeRegex,
 ) async {
   CurrencyRead? currency;
   double amount = 0;
+  bool isExpense = false;
+  int sign = 0; // -1 = expense, +1 = income, 0 = unknown
 
   // Try to extract some money
-  Iterable<RegExpMatch> matches;
-  if (customRegex.isNotEmpty) {
-    // Use custom regex for amount extraction
-    try {
-      final RegExp customRegExp = RegExp(customRegex, caseSensitive: false);
-      matches = customRegExp.allMatches(notificationBody);
-    } catch (e) {
-      log.warning(
-        "Invalid custom regex: $customRegex, falling back to default",
-      );
-      matches = rFindMoney.allMatches(notificationBody);
-    }
-  } else {
-    // Use default regex
-    matches = rFindMoney.allMatches(notificationBody);
+  Iterable<RegExpMatch> matches = const <RegExpMatch>[];
+  RegExp? chosen;
+
+  if (expenseRegex.isNotEmpty) {
+    chosen = RegExp(expenseRegex, caseSensitive: false);
+    matches = chosen.allMatches(notificationBody);
+    if (matches.isNotEmpty) sign = -1;
+  }
+  if (matches.isEmpty && incomeRegex.isNotEmpty) {
+    chosen = RegExp(incomeRegex, caseSensitive: false);
+    matches = chosen.allMatches(notificationBody);
+    if (matches.isNotEmpty) sign = 1;
+  }
+  if (matches.isEmpty) {
+    chosen = rFindMoney;
+    matches = chosen.allMatches(notificationBody);
   }
 
-  if (matches.isNotEmpty) {
-    for (RegExpMatch validMatch in matches) {
-      // For custom regex, we only extract amount, currency logic remains the same
-      bool shouldProcess = false;
-      String? currencyStr;
+  if (matches.isEmpty) {
+    log.warning("regex did not match");
+    return (currency, amount, isExpense);
+  }
 
-      if (customRegex.isNotEmpty) {
-        // Custom regex
-        shouldProcess = true;
-        currencyStr = validMatch.namedGroup("currency");
+  // extract currency
+  for (RegExpMatch validMatch in matches) {
+    String? currencyStr = validMatch.namedGroup("currency");
+    if (currencyStr == null || currencyStr.isEmpty) {
+      currencyStr =
+          validMatch.namedGroup("preCurrency") ??
+          validMatch.namedGroup("postCurrency");
+    }
+
+    if (currencyStr != null && currencyStr.isNotEmpty) {
+      final String c = currencyStr.trim();
+      final String cu = c.toUpperCase();
+
+      if (cu == (localCurrency.attributes.code).toUpperCase() ||
+          cu == (localCurrency.attributes.symbol).toUpperCase()) {
+        currency = localCurrency;
       } else {
-        // Default regex: check for currency groups
-        shouldProcess =
-            (validMatch.namedGroup("postCurrency")?.isNotEmpty ?? false) ||
-            (validMatch.namedGroup("preCurrency")?.isNotEmpty ?? false);
-        currencyStr = validMatch.namedGroup("preCurrency")?.trim();
-        currencyStr ??= validMatch.namedGroup("postCurrency")?.trim();
-      }
-
-      if (!shouldProcess) continue;
-
-      if (currencyStr != null && currencyStr.isNotEmpty) {
-        final String c = currencyStr.trim();
-        final String cu = c.toUpperCase();
-
-        if (cu == "VND" ||
-            cu == "Đ" ||
-            c == "₫" ||
-            cu == (localCurrency.attributes.code).toUpperCase() ||
-            cu == (localCurrency.attributes.symbol).toUpperCase()) {
-          currency = localCurrency;
-        } else {
-          try {
-            final Response<CurrencyArray> response =
-                await api.v1CurrenciesGet();
-            if (response.isSuccessful && response.body != null) {
-              for (final CurrencyRead cur in response.body!.data) {
-                if (cur.attributes.code.toUpperCase() == c ||
-                    cur.attributes.symbol.toUpperCase() == c) {
-                  currency = cur;
-                  break;
-                }
+        try {
+          final Response<CurrencyArray> response = await api.v1CurrenciesGet();
+          if (response.isSuccessful && response.body != null) {
+            for (final CurrencyRead cur in response.body!.data) {
+              if (cur.attributes.code.toUpperCase() == c ||
+                  cur.attributes.symbol.toUpperCase() == c) {
+                currency = cur;
+                break;
               }
             }
-          } catch (e) {
-            log.warning("currency lookup failed: $e");
           }
+        } catch (e) {
+          log.warning("currency lookup failed: $e");
         }
-      } else if (customRegex.isNotEmpty) {
-        // Fallback local
-        currency = localCurrency;
       }
+    } else if (chosen != rFindMoney) {
+      // Fallback local
+      currency = localCurrency;
+    }
 
-      // extract amount
-      final String amountStr = (validMatch.namedGroup("amount") ?? "")
-          .replaceAll(RegExp(r"\s+"), "");
+    // extract amount
+    final String amountStr = (validMatch.namedGroup("amount") ?? "").replaceAll(
+      RegExp(r"\s+"),
+      "",
+    );
 
-      if (amountStr.isEmpty) continue;
+    if (amountStr.isEmpty) continue;
 
-      final int decimals =
-          currency?.attributes.decimalPlaces ??
-          localCurrency.attributes.decimalPlaces ??
-          2;
+    final int decimals =
+        currency?.attributes.decimalPlaces ??
+        localCurrency.attributes.decimalPlaces ??
+        2;
 
-      if (decimals == 0) {
-        final String digitsOnly = amountStr.replaceAll(RegExp(r"[.,]"), "");
-        amount = double.tryParse(digitsOnly) ?? 0;
+    if (decimals == 0) {
+      final String digitsOnly = amountStr.replaceAll(RegExp(r"[.,]"), "");
+      amount = double.tryParse(digitsOnly) ?? 0;
+    } else {
+      final String s = amountStr;
+      final int lastDot = s.lastIndexOf('.');
+      final int lastComma = s.lastIndexOf(',');
+      final int decPos = lastDot > lastComma ? lastDot : lastComma;
+
+      if (decPos > 0 && (s.length - decPos - 1) <= 3) {
+        final String wholes = s
+            .substring(0, decPos)
+            .replaceAll(RegExp(r"[.,]"), "");
+        final String fracRaw = s
+            .substring(decPos + 1)
+            .replaceAll(RegExp(r"[.,]"), "");
+
+        final String frac =
+            (fracRaw.length > decimals)
+                ? fracRaw.substring(0, decimals)
+                : fracRaw.padRight(decimals, '0');
+
+        amount = double.tryParse("$wholes.$frac") ?? 0;
       } else {
-        final String s = amountStr;
-        final int lastDot = s.lastIndexOf('.');
-        final int lastComma = s.lastIndexOf(',');
-        final int decPos = lastDot > lastComma ? lastDot : lastComma;
-
-        if (decPos > 0 && (s.length - decPos - 1) <= 3) {
-          final String wholes = s
-              .substring(0, decPos)
-              .replaceAll(RegExp(r"[.,]"), "");
-          final String fracRaw = s
-              .substring(decPos + 1)
-              .replaceAll(RegExp(r"[.,]"), "");
-
-          final String frac =
-              (fracRaw.length > decimals)
-                  ? fracRaw.substring(0, decimals)
-                  : fracRaw.padRight(decimals, '0');
-
-          amount = double.tryParse("$wholes.$frac") ?? 0;
-        } else {
-          amount = double.tryParse(s.replaceAll(RegExp(r"[.,]"), "")) ?? 0;
-        }
-      }
-
-      // Only break if currency matched (for default regex) or if using custom regex
-      // otherwise, might be better to continue to next match...
-      if (customRegex.isNotEmpty || currency != null) {
-        log.finest(() => "best match found, breaking");
-        break;
+        amount = double.tryParse(s.replaceAll(RegExp(r"[.,]"), "")) ?? 0;
       }
     }
-  } else {
-    log.warning("regex did not match");
+
+    isExpense = sign < 0;
+
+    break;
   }
 
-  return (currency, amount);
+  return (currency, amount, isExpense);
 }

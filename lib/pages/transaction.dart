@@ -357,24 +357,28 @@ class _TransactionPageState extends State<TransactionPage>
           final SettingsProvider settings = context.read<SettingsProvider>();
 
           log.info("Got notification ${widget.notification?.title}");
-          _transactionType = TransactionTypeProperty.withdrawal;
           final CurrencyRead defaultCurrency =
               context.read<FireflyService>().defaultCurrency;
           late CurrencyRead? currency;
           late double amount;
+          late bool isExpense = false;
 
           // Title & Note
           final NotificationAppSettings appSettings = await settings
               .notificationGetAppSettings(widget.notification!.appName);
 
-          final String customRegex = appSettings.customRegex ?? "";
-
-          (currency, amount) = await parseNotificationText(
+          (currency, amount, isExpense) = await parseNotificationText(
             api,
             widget.notification!.body,
             _localCurrency!,
-            customRegex,
+            appSettings.expenseRegex ?? "",
+            appSettings.incomeRegex ?? "",
           );
+
+          _transactionType =
+              isExpense
+                  ? TransactionTypeProperty.withdrawal
+                  : TransactionTypeProperty.deposit;
 
           // Fallback solution
           currency ??= defaultCurrency;
@@ -405,9 +409,15 @@ class _TransactionPageState extends State<TransactionPage>
                 widget.notification!.body.containsIgnoreCase(
                   acc.attributes.name,
                 )) {
-              _sourceAccountTextController.text = acc.attributes.name;
-              _ownAccountId = acc.id;
-              _sourceAccountType = AccountTypeProperty.assetAccount;
+              if (_transactionType == TransactionTypeProperty.withdrawal) {
+                _sourceAccountTextController.text = acc.attributes.name;
+                _ownAccountId = acc.id;
+                _sourceAccountType = AccountTypeProperty.assetAccount;
+              } else {
+                _destinationAccountTextController.text = acc.attributes.name;
+                _ownAccountId = acc.id;
+                _destinationAccountType = AccountTypeProperty.assetAccount;
+              }
               if (currency.id == acc.attributes.currencyId) {
                 _localCurrency = currency;
               } else {
