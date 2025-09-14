@@ -79,9 +79,28 @@ still doesn't show up, there are a couple of reasons why:
 
 **Q: The app selects the wrong currency!**
 
-A: Most of the time, the issue is from currencies that also use the `$` (Dollar) sign, for example Austrian Dollar (`A$`). The app checks the notification for an exact match of the currency, so a transaction with "*You paid $12.34*" gets matched to the (US-)Dollar. To fix this, you can change the currency settings in Firefly III, for example make the sign of the US-Dollar to `US$`, and change Austrian Dollar from `A$` to just `$`. This way, notifications with just `$` will get matched to Austrian Dollar.
+A: Most of the time, the issue is from currencies that also use the `$` (Dollar) sign, for example Austrian Dollar (`A$`). The app checks the notification for an exact match of the currency, so a transaction with "_You paid $12.34_" gets matched to the (US-)Dollar. To fix this, you can change the currency settings in Firefly III, for example make the sign of the US-Dollar to `US$`, and change Austrian Dollar from `A$` to just `$`. This way, notifications with just `$` will get matched to Austrian Dollar.
 
+**Q: How can I use custom regex for parsing bank notifications?**
 
+A: Some banks format their SMS/app notifications differently (with or without `+/-`, different separators, currency at the end, etc.).  
+You can define a **custom regex** for each bank in the app. The regex must contain at least two named groups:
+
+- `amount` → the transaction amount
+- `currency` → the currency code or symbol (e.g. `VND`, `đ`, `$`)
+
+The app will use these groups to detect the transaction value and match the currency with Firefly III.  
+If no currency matches, it will fall back to your local currency.
+
+---
+
+### Example
+
+**Generic expense regex (works for many banks):**
+
+```regex
+(?<amount>\d{1,3}(?:[.,]\d{3})+|\d+)\s*(?<currency>VND|đ|₫|\$)
+```
 
 ## Misc
 
