@@ -172,6 +172,7 @@
         <package android:name="com.interbank.mobile"/>
         <package android:name="com.joaomgcd.autonotification"/>
         <package android:name="com.kasikorn.retail.mbanking.wap"/>
+        <package android:name="com.kasikornbank.kplus.vn"/>
         <package android:name="com.konylabs.capitalone"/>
         <package android:name="com.krungsri.kma"/>
         <package android:name="com.latuabancaperandroid"/>
